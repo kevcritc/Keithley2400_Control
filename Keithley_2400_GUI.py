@@ -23,10 +23,10 @@ print('Device List is',rm.list_resources())
 adapter=VISAAdapter("ASRL/dev/cu.usbserial-FTK20294::INSTR", timeout=None)
 sourcemeter = Keithley2400(adapter)
 class IVsweep():
-    
     # Connect and configure the instrument might need to edit
     def collect_data(self):
         self.running=False
+        self.sweep=True
         self.data_points = int(self.step_box.get())
         self.averages = int(self.ave_box.get())
         self.max_current = float(self.climit_box.get())
@@ -57,15 +57,16 @@ class IVsweep():
         currents = np.zeros_like(voltages)
         currentsstd = np.zeros_like(voltages)
        
-        
+        i=0
         # Loop through each current point, measure and record the voltage
-        for i in range(len(voltages)):
+        while i<len(voltages) and self.sweep:
             sourcemeter.source_voltage=voltages[i]
             sleep(0.1)
             currarray=np.array(sourcemeter.current)
             # Record the average and standard deviation
             currents[i] = np.mean(currarray)
             currentsstd[i] =np.std(currarray)
+            i+=1
             
            
         sourcemeter.shutdown()    
@@ -94,24 +95,24 @@ class IVsweep():
 # Class for setting voltage manually and steping.
 class Set_voltage:
     def apply(self):
-        self.max_current = float(self.limit_box.get())
-        if self.max_current>1.0:
-            self.max_current=1.0
-        self.setV=float(self.V_box.get())
-        self.running=True
-        sourcemeter.use_front_terminals()
-        sourcemeter.apply_voltage()
-        sourcemeter.measure_current(nplc=1,current=self.max_current, auto_range=0.1)
-        sourcemeter.compliance_current=self.max_current
-        sleep(0.1) # wait here to give the instrument time to react
-        sourcemeter.sample_continuously()
-        sourcemeter.source_voltage=self.setV
-        sourcemeter.enable_source()
-        
-        sleep(0.1)
-        while self.running:
-            smc=sourcemeter.current
-            sleep(0.2)
+        if not self.t2.is_alive():
+            self.max_current = float(self.limit_box.get())
+            if self.max_current>1.0:
+                self.max_current=1.0
+            self.setV=float(self.V_box.get())
+            self.running=True
+            sourcemeter.use_front_terminals()
+            sourcemeter.apply_voltage()
+            sourcemeter.measure_current(nplc=1,current=self.max_current, auto_range=0.1)
+            sourcemeter.compliance_current=self.max_current
+            sleep(0.1) # wait here to give the instrument time to react
+            sourcemeter.sample_continuously()
+            sourcemeter.source_voltage=self.setV
+            sourcemeter.enable_source()
+            sleep(0.1)
+            while self.running:
+                smc=sourcemeter.current
+                sleep(0.2)
     def plus_volt(self):
         volts=float(self.V_box.get())
         step=float(self.V_step_box.get())
@@ -131,13 +132,13 @@ class Set_voltage:
         sleep(1)
         self.threading1()
     def stop_voltage(self):
+        self.sweep=False
         self.running=False
         sleep(1)
         sourcemeter.shutdown()
         
 class App(IVsweep,Set_voltage):
     def __init__(self,master):
-       
         self.master=master
         self.master.title('Keithley 2400 Control')
         row=0
@@ -164,7 +165,7 @@ class App(IVsweep,Set_voltage):
         self.step_label.grid(column=0,row=row)
         self.step_box=Entry(self.master,width=4)
         self.step_box.grid(column=1,row=row)
-        self.step_box.insert(0,'21')
+        self.step_box.insert(0,'20')
         row=3
         self.ave_label=Label(self.master,text='Averages',anchor='e')
         self.ave_label.grid(column=0,row=row)
@@ -207,10 +208,11 @@ class App(IVsweep,Set_voltage):
         self.sample_box=Entry(self.master,width=10)
         self.sample_box.grid(column=3,row=row)
 
-        self.button=Button(self.master,text='Run', command=self.collect_data)
+        self.button=Button(self.master,text='Run', command=self.threading2)
         self.button.grid(column=3,row=6)
         self.set_volts_label=Label(self.master,text='Manual Control')
         self.set_volts_label.grid(column=0, row=7)
+        
         row=10
         self.go_button=Button(self.master,text='Go', command=self.threading1)
         self.go_button.grid(column=0, row=row)
@@ -218,13 +220,19 @@ class App(IVsweep,Set_voltage):
         self.plus_button.grid(column=1, row=row)
         self.minus_button=Button(self.master,text='-', command=self.minus_volt)
         self.minus_button.grid(column=2, row=row)
+        
         row=11
         self.stop_button=Button(self.master,text='Stop', command=self.stop_voltage)
         self.stop_button.grid(column=0, row=row)
         super().__init__()
+        
     def threading1(self):
         t1=Thread(target=self.apply)
         t1.start()
+    def threading2(self):
+        self.t2=Thread(target=self.collect_data)
+        self.t2.start()
+
 
 
 root=Tk()
