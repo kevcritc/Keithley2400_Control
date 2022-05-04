@@ -164,7 +164,7 @@ class App(IVsweep,Set_voltage):
         self.step_label.grid(column=0,row=row)
         self.step_box=Entry(self.master,width=4)
         self.step_box.grid(column=1,row=row)
-        self.step_box.insert(0,'50')
+        self.step_box.insert(0,'21')
         row=3
         self.ave_label=Label(self.master,text='Averages',anchor='e')
         self.ave_label.grid(column=0,row=row)
@@ -178,14 +178,14 @@ class App(IVsweep,Set_voltage):
         self.climit_label.grid(column=0,row=row)
         self.climit_box=Entry(self.master,width=4)
         self.climit_box.grid(column=1,row=row)
-        self.climit_box.insert(0,'1E-6')
+        self.climit_box.insert(0,'10E-3')
         
         row=8
         self.set_limit_label1=Label(self.master,text='Current Limit')
         self.set_limit_label1.grid(column=0, row=row)
         self.limit_box=Entry(self.master,width=4)
         self.limit_box.grid(column=1,row=row)
-        self.limit_box.insert(0,'1E-6')
+        self.limit_box.insert(0,'10E-3')
         
         
         row=9
