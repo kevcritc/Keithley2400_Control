@@ -315,13 +315,15 @@ class connect_keithley:
                     if j==len(self.devicelist):
                         print('Keithley 2400 not found')
                         return False, None
+                    break
                     
             except:
                 j+=1
                 
-                if j==len(self.devicelist):
+                if j>=len(self.devicelist):
                     print('Keithley 2400 not found')
                     return False, None
+                    break
                 
             
             
