@@ -305,6 +305,7 @@ class connect_keithley:
                 if check[0:8]=='KEITHLEY':
                     print('Connection Established')
                     del sm
+                    self.adapter=VISAAdapter(self.devicelist[j], timeout=None)
                     sourcemeter=Keithley2400(self.adapter)
                     return True, sourcemeter
                     
