@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 from pymeasure.instruments.keithley import Keithley2400
 from pymeasure.adapters import VISAAdapter
 import pyvisa as visa
+from random import shuffle
 
 
 
@@ -290,11 +291,15 @@ class App(IVsweep,Set_voltage):
 class connect_keithley:
     def __init__(self):
         self.rm = visa.ResourceManager()
+        
 # print('Device List is',rm.list_resources())
     def find(self):
         j=0
+        found=False
         self.devicelist=self.rm.list_resources()
-        while True and j<len(self.devicelist):
+        
+        print(self.devicelist)
+        while j<len(self.devicelist) and not found:
             
             try:
                 print('Attemping to connect try=', j)
@@ -304,37 +309,35 @@ class connect_keithley:
                 
                 if check[0:8]=='KEITHLEY':
                     print('Connection Established')
-                    del sm
-                    self.adapter=VISAAdapter(self.devicelist[j], timeout=None)
-                    sourcemeter=Keithley2400(self.adapter)
-                    return True, sourcemeter
-                    
-                else:
-                
-                    j+=1
-                    if j==len(self.devicelist):
-                        print('Keithley 2400 not found')
-                        return False, None
+                    sourcemeter=sm
+                    found=True
                     break
+                else:
+                    j+=1
                     
             except:
+                print('Not the Keithley')
                 j+=1
+                sleep(1)
                 
-                if j>=len(self.devicelist):
-                    print('Keithley 2400 not found')
-                    return False, None
-                    break
+                    
+                    
+        if found:
+            return True, sourcemeter
+        else:
+            print('Keithley 2400 not found')
+            return False, None
                 
             
-            
-connection=connect_keithley()
-query, sourcemeter=connection.find()
-
-if query:
-    root=Tk()
+if __name__=='__main__':            
+    connection=connect_keithley()
+    query, sourcemeter=connection.find()
     
-    app=App(root)
-    
-    mainloop()
-    
-    sourcemeter.shutdown()
+    if query:
+        root=Tk()
+        
+        app=App(root)
+        
+        mainloop()
+        
+        sourcemeter.shutdown()
