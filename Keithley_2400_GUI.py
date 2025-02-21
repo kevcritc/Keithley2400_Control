@@ -299,7 +299,7 @@ class App(IVsweep4probe,Set_voltage):
         # Manual control frame
         self.frame2=LabelFrame(self.master, text='Manual Voltage Control', pady=28, padx=10)
         self.frame2.grid(column=3, row=1, pady=10)
-        self.set_limit_label1=Label(self.frame2,text='Compliance Voltage (default 100 mV if no change)')
+        self.set_limit_label1=Label(self.frame2,text='Compliance Voltage')
         self.set_limit_label1.grid(column=0, row=0,sticky='e')
         self.Vlimit_box=Entry(self.frame2,width=12,justify='right')
         self.Vlimit_box.grid(column=1,row=0)
@@ -468,3 +468,4 @@ if __name__=='__main__':
         mainloop()
         
         sourcemeter.shutdown()
+        print('The Keithley is switched to off')
