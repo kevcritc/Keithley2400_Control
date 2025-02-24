@@ -8,7 +8,6 @@ Created on Fri Mar 18 18:23:27 2022
 from tkinter import *
 from queue import Queue
 from threading import *
-from math import sqrt
 from time import sleep
 import numpy as np
 import datetime
@@ -18,11 +17,9 @@ from matplotlib.backends.backend_tkagg import (FigureCanvasTkAgg,  NavigationToo
 from pymeasure.instruments.keithley import Keithley2400
 from pymeasure.adapters import VISAAdapter
 import pyvisa as visa
-from random import shuffle
-
 
 class IVsweep():
-    # Connect and configure the instrument might need to edit
+    '''Connect and configure the instrument'''
     # Either uses loop values or V1 to V2  method.
     def collect_data(self):
         self.running=False
@@ -99,7 +96,7 @@ class IVsweep():
         #plt.show()
 #%%
 class IVsweep4probe():
-    # Connect and configure the instrument might need to edit
+    '''Connect and configure the instrument for four probe'''
     # Either uses loop values or V1 to V2  method.
     def collect_data1(self, queue):
         self.running=True
@@ -165,7 +162,7 @@ class IVsweep4probe():
             'Voltage std (A)':voltsstd,
             'Current (µA)': self.amps * 1000000,
             'Voltage mean (mV)': volts * 1000,
-            'Voltage std (A)': voltsstd*1000
+            'Voltage std (mV)': voltsstd*1000
         })
         # create a file name usine time date save it to the py code path.
         name=str(datetime.datetime.now())
@@ -176,11 +173,6 @@ class IVsweep4probe():
         data.to_csv(full_filename)
         self.running=False
         
-
-#%%
-# Set up threading for the manual control part
-
-
 # Class for setting voltage manually and steping.
 class Set_voltage:
     def man_V(self):
@@ -297,7 +289,7 @@ class App(IVsweep4probe,Set_voltage):
         self.looplabel.grid(column=4,row=0,sticky='e')
         
         # Manual control frame
-        self.frame2=LabelFrame(self.master, text='Manual Voltage Control', pady=28, padx=10)
+        self.frame2=LabelFrame(self.master, text='Compliance Voltage and Applying Manual Voltage Setting', pady=28, padx=10)
         self.frame2.grid(column=3, row=1, pady=10)
         self.set_limit_label1=Label(self.frame2,text='Compliance Voltage')
         self.set_limit_label1.grid(column=0, row=0,sticky='e')
