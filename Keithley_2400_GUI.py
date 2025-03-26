@@ -108,7 +108,7 @@ class IVsweep4probe():
         self.queue=queue
         self.data_points = int(self.step_box.get())
         self.averages = int(self.ave_box.get())
-        self.max_volt = float(self.Vlimit_box.get())
+        self.max_volt = float(self.vlimit_box.get())
         if abs(self.max_volt)>199:
             self.max_volt=199
         self.dialoge_queue.put(f'Max voltage allowed is {self.max_volt}')
