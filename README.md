@@ -7,4 +7,6 @@ Data is ploted live using a seperate window.
 
 Current can be data logged, with a constant current applied, with a minimium time interval of about 1 second.
 
+Can also perform voltage sweeps and measure the current.
+
 Please acknowledge Kevin Critchley if data collected using the code is disseminated.
