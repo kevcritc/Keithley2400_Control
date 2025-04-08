@@ -981,6 +981,7 @@ class ConnectKeithley:
 
         found=False
         self.devicelist=self.rm.list_resources()
+        self.devicelist.reverse()
         self.dialogue_queue.put(f'The device list is {self.devicelist}')
         
         for resource in self.devicelist:
