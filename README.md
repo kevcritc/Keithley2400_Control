@@ -9,4 +9,8 @@ Current can be data logged, with a constant current applied, with a minimium tim
 
 Can also perform voltage sweeps and measure the current.
 
+Settings can be saved to a json and loaded.
+
+Connecting to the Keithley is performed in the app.  It is a little slow because it checks every port.
+
 Please acknowledge Kevin Critchley if data collected using the code is disseminated.
