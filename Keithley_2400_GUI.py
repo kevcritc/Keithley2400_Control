@@ -88,7 +88,7 @@ class IVsweep():
             'Current std (A)': currentsstd
         })
         
-        name = str(datetime.datetime.now()).split('.')[0].replace(' ', '_').replace(':', '_') + '.csv'
+        name = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S.csv")
         full_filename = os.path.join(self.save_path, self.prename + '_' + name)
         df=pd.DataFrame(data)
         df.to_csv(full_filename)
@@ -170,17 +170,12 @@ class IVsweep4probe():
             'Current (A)': self.amps,
             'Voltage mean (V)': volts,
             'Voltage std (A)':voltsstd,
-            'Current (µA)': self.amps * 1000000,
-            'Voltage mean (mV)': volts * 1000,
-            'Voltage std (mV)': voltsstd*1000
+            
         })
         # create a file name usine time date save it to the py code path.
-        name=str(datetime.datetime.now())
-        splitname=name.split('.')
-        replace=splitname[0].replace(' ','_')
-        filename=replace.replace(':','_')+'.csv'
+        name = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S.csv")
         
-        full_filename = os.path.join(self.save_dir.get(), self.sample_box.get() + filename)
+        full_filename = os.path.join(self.save_dir.get(), self.sample_box.get() + name)
         df=pd.DataFrame(data)
         df.to_csv(full_filename)
         self.dialogue_queue.put(f'Data saved to{full_filename}')
@@ -313,18 +308,15 @@ class Log_current:
             
         })
         # create a file name usine time date save it to the py code path.
-        name=str(datetime.datetime.now())
-        splitname=name.split('.')
-        replace=splitname[0].replace(' ','_')
-        filename=replace.replace(':','_')+'.csv'
+        name = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S.csv")
         save_path = self.time_log_dir.get()
         if not save_path:
             self.dialogue_queue.put("No time log directory selected — using default path.")
             save_path = os.getcwd()
         
-        full_filename = os.path.join(save_path, self.f_name.get() + filename)
-        df=pd.DataFrame(data)
-        df.to_csv(full_filename)
+        full_filename = os.path.join(save_path, self.f_name.get() + name)
+        
+        data.to_csv(full_filename)
         self.dialogue_queue.put(f'Saved {full_filename}')
         
         
@@ -339,7 +331,7 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
         self.sourcemeter=sourcemeter
         self.statecol=NORMAL
         self.master=master
-        self.master.title('Keithley 2400 Control Panel')
+        self.master.title('Keithley 2400 Series Control Panel - K Critchley')
         
         self.data_queue=Queue()
         self.time_data_queue=Queue()
@@ -820,7 +812,7 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
                 self.query = False
                 self.dialogue_queue.put("Keithley disconnected.")
                 self.connection_status.config(text="Not Connected", fg="red")
-                self.set_control_state(DISABLED)
+                self.set_controls_state(DISABLED)
                 self.sourcemeter.adapter = None
             except Exception as e:
                 self.dialogue_queue.put(f"Error during disconnect: {e}")
@@ -978,27 +970,27 @@ class ConnectKeithley:
         self.dialogue_queue=dialogue_queue
 
     def find(self):
-
-        found=False
-        self.devicelist=self.rm.list_resources()
-        self.devicelist.reverse()
+        found = False
+        self.devicelist = self.rm.list_resources()
+        d_list = list(self.devicelist)
+        d_list.reverse()
         self.dialogue_queue.put(f'The device list is {self.devicelist}')
         
-        for resource in self.devicelist:
+        for resource in d_list:
             try:
-                adapter = VISAAdapter(resource, timeout=5000)
-                self.dialogue_queue.put('Try to connect...')
+                adapter = VISAAdapter(resource, timeout=10000)
+                self.dialogue_queue.put(f'Trying to connect to {resource}...')
                 sm = Keithley2400(adapter)
-                if sm.id.startswith("KEITHLEY"):
+                idn = sm.id.strip()
+                if "KEITHLEY" in idn and "2400" in idn:
                     return True, sm
-                found=True
-            except Exception:
-                continue
                 
-         
-        if not found:
-            self.dialogue_queue.put('Keithley 2400 not found')
-            return False, None
+            except Exception as e:
+                self.dialogue_queue.put(f'Failed to connect to {resource}: {e}')
+                continue
+    
+        self.dialogue_queue.put("Keithley 2400 not found.")
+        return False, None
                 
             
 if __name__=='__main__':   
