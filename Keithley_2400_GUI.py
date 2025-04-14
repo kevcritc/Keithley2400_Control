@@ -17,6 +17,7 @@ from matplotlib.backends.backend_tkagg import (FigureCanvasTkAgg,  NavigationToo
 from pymeasure.instruments.keithley import Keithley2400
 from pymeasure.adapters import VISAAdapter
 import pyvisa as visa
+from pyvisa.constants import Parity, StopBits, FlowControl
 from tkinter import messagebox,filedialog
 import os
 import warnings
@@ -933,14 +934,15 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
             if not self.data_queue.empty():
                 data = self.data_queue.get()
                 ax.clear()
-                if self.source_type=='current':
-                    ax.errorbar(data[1], data[0], xerr=data[2], color='black', marker='o')
+                if self.source_type == 'current':
+                    ax.errorbar(data[0], data[1], yerr=data[2], color='black', marker='o')
                     ax.set_xlabel('Current /A')
                     ax.set_ylabel('Voltage /V')  
                 else:
                     ax.errorbar(data[0], data[1], yerr=data[2], color='black', marker='o')
-                    ax.set_ylabel('Current /A')
-                    ax.set_xlabel('Voltage /V')  
+                    ax.set_xlabel('Voltage /V')
+                    ax.set_ylabel('Current /A')  
+
                     
     
                 
@@ -966,29 +968,48 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
 
 class ConnectKeithley:
     def __init__(self, dialogue_queue):
-        self.rm = visa.ResourceManager()
-        self.dialogue_queue=dialogue_queue
+        import pyvisa
+        self.rm = pyvisa.ResourceManager()
+        self.dialogue_queue = dialogue_queue
 
     def find(self):
-        found = False
         self.devicelist = self.rm.list_resources()
         d_list = list(self.devicelist)
-        d_list.reverse()
+        d_list.reverse()  # optional: prioritize newer devices first
         self.dialogue_queue.put(f'The device list is {self.devicelist}')
-        
+
         for resource in d_list:
             try:
-                adapter = VISAAdapter(resource, timeout=10000)
                 self.dialogue_queue.put(f'Trying to connect to {resource}...')
+
+                # Handle serial resources explicitly
+                if "ASRL" in resource or "COM" in resource:
+                    adapter = VISAAdapter(
+                        resource,
+                        timeout=10000,
+                        baud_rate=9600,
+                        data_bits=8,
+                        stop_bits=StopBits.one,
+                        parity=Parity.none,
+                        flow_control=FlowControl.none,
+                        write_termination="\r",
+                        read_termination="\n"
+                    )
+                else:
+                    adapter = VISAAdapter(resource, timeout=10000)
+
                 sm = Keithley2400(adapter)
                 idn = sm.id.strip()
+                self.dialogue_queue.put(f'Response: {idn}')
+
                 if "KEITHLEY" in idn and "2400" in idn:
+                    self.dialogue_queue.put(f'Connected to Keithley 2400 at {resource}')
                     return True, sm
-                
+
             except Exception as e:
                 self.dialogue_queue.put(f'Failed to connect to {resource}: {e}')
                 continue
-    
+
         self.dialogue_queue.put("Keithley 2400 not found.")
         return False, None
                 
@@ -1015,8 +1036,3 @@ if __name__=='__main__':
     app=App(root, sourcemeter)
     root.protocol("WM_DELETE_WINDOW", on_closing)
     mainloop()
-    
-    
-
-        
-        
