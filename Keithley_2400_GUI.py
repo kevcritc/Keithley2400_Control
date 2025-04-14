@@ -943,8 +943,6 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
                     ax.set_xlabel('Voltage /V')
                     ax.set_ylabel('Current /A')  
 
-                    
-    
                 
                 self.canvas.draw()
                 
@@ -1011,6 +1009,8 @@ class ConnectKeithley:
                 continue
 
         self.dialogue_queue.put("Keithley 2400 not found.")
+        self.dialogue_queue.put("Check the Keithley is in RS232 mode, baud =9600, bits =8, parity= none, flow control= none, read termination= CR")
+        self.dialogue_queue.put("and or try switch on and off and replug the USB in.")
         return False, None
                 
             
@@ -1036,3 +1036,8 @@ if __name__=='__main__':
     app=App(root, sourcemeter)
     root.protocol("WM_DELETE_WINDOW", on_closing)
     mainloop()
+    
+    
+
+        
+        
