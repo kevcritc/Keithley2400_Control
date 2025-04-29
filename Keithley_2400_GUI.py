@@ -277,14 +277,16 @@ class Log_current:
         time.sleep(0.1) 
         self.sourcemeter.use_front_terminals()
         time.sleep(0.1) 
-        self.sourcemeter.apply_voltage()
-        time.sleep(0.1) 
+        
         if self.four_wire_time.get() == 1:
             self.sourcemeter.adapter.write("SYST:RSEN ON")
             self.dialogue_queue.put("4-wire sensing enabled (time log).")
         else:
             self.sourcemeter.adapter.write("SYST:RSEN OFF")
             self.dialogue_queue.put("4-wire sensing disabled (time log).")
+        time.sleep(0.1)  
+        self.sourcemeter.apply_voltage()
+        
 
         time.sleep(0.1) 
         self.sourcemeter.source_mode = 'voltage'
@@ -1111,3 +1113,8 @@ if __name__=='__main__':
     app=App(root, sourcemeter)
     root.protocol("WM_DELETE_WINDOW", on_closing)
     mainloop()
+    
+    
+
+        
+        
