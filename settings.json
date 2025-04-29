@@ -1,7 +1,7 @@
 {
     "IV_sweep": {
         "start": "0.0",
-        "end": "1E-6",
+        "end": "1E-4",
         "steps": "20"
     },
     "loop": {
@@ -14,27 +14,31 @@
     "manual": {
         "compliance": "1.0",
         "voltage": "1.00",
-        "step": "0.1"
+        "step": "0.1",
+        "four_wire": 0
     },
     "run": {
         "voltage_limit": "50",
         "buffer": "10",
-        "mode": 0
+        "mode": 0,
+        "four_wire": 1
     },
     "time_log": {
         "voltage": "5",
         "compliance": "0.1",
         "interval": "1",
         "duration": "3600",
-        "filename": ""
+        "filename": "",
+        "four_wire": 0
     },
     "voltage_sweep": {
         "start": "0.0",
-        "end": "10.0",
+        "end": "1E-4",
         "points": "20",
         "buffer": "10",
         "compliance": "0.1",
         "sample_name": "",
-        "save_dir": ""
+        "save_dir": "/Users/phykc/Downloads",
+        "four_wire": 0
     }
 }
