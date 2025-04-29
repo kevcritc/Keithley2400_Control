@@ -1068,7 +1068,7 @@ class ConnectKeithley:
                         parity=Parity.none,
                         flow_control=0,
                         write_termination="\r",
-                        read_termination="\n"
+                        read_termination="\r"
                     )
                 else:
                     adapter = VISAAdapter(resource, timeout=10000)
@@ -1114,7 +1114,3 @@ if __name__=='__main__':
     root.protocol("WM_DELETE_WINDOW", on_closing)
     mainloop()
     
-    
-
-        
-        
