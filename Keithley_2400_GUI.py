@@ -22,6 +22,8 @@ from tkinter import messagebox,filedialog
 import os
 import warnings
 import json
+import re
+
 
 class IVsweep():
     def collect_data(self):
@@ -34,11 +36,8 @@ class IVsweep():
         self.averages = int(self.vsweep_buffer.get())
         self.startV = float(self.vsweep_start.get())
         self.endV = float(self.vsweep_end.get())
-        self.prename = self.vsweep_sample.get()
         self.save_path = self.vsweep_save_dir.get()
         self.max_current = float(self.vsweep_compliance.get())
-        
-        
 
         if self.startV > self.endV:
             self.startV, self.endV = self.endV, self.startV
@@ -62,7 +61,13 @@ class IVsweep():
         time.sleep(0.1)
         self.sourcemeter.enable_source()
         time.sleep(0.1)
-        self.sourcemeter.measure_current(nplc=0.1,current=self.max_current, auto_range=0.1)
+        # --- Current ---
+        selected_i_range = self.current_range_var.get()
+        if selected_i_range == "auto":
+            self.sourcemeter.measure_current(auto_range=True)
+        else:
+            self.sourcemeter.measure_current(current=float(selected_i_range), auto_range=False)
+
         
         self.voltages = np.linspace(self.startV, self.endV, num=self.data_points)
         self.running=True
@@ -89,6 +94,10 @@ class IVsweep():
 
         self.dialogue_queue.put('Saving data')
         self.sourcemeter.shutdown()
+        raw_name = self.vsweep_sample.get()
+        safe_name = self.sanitize_filename(raw_name)
+        name = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S.csv")
+        full_filename = os.path.join(self.save_path, safe_name + '_' + name)
 
         data = pd.DataFrame({
             'Voltage (V)': self.voltages,
@@ -96,11 +105,19 @@ class IVsweep():
             'Current std (A)': currentsstd
         })
         
-        name = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S.csv")
-        full_filename = os.path.join(self.save_path, self.prename + '_' + name)
+    
         df=pd.DataFrame(data)
         df.to_csv(full_filename)
+        # Define the JSON settings filename
+        settings_filename = full_filename.replace(".csv", "_settings.json")
+        
+        # Save current settings using your existing method
+        with open(settings_filename, 'w') as f:
+            json.dump(self.get_settings_dict(), f, indent=4)
+
+
         self.dialogue_queue.put(f'Data saved to {full_filename}')
+        self.dialogue_queue.put(f"Settings saved to {settings_filename}")
 
 
         
@@ -109,57 +126,69 @@ class IVsweep4probe():
     # Connect and configure the instrument might need to edit
     # Either uses loop values or V1 to V2  method.
     def collect_data1(self, queue):
-        self.dialogue_queue.put('Setting up measurement')
-        self.running=True
-        self.sweep=True
-        self.queue=queue
-        self.data_points = int(self.step_box.get())
-        self.averages = int(self.ave_box.get())
-        self.max_volt = float(self.vlimit_box.get())
-        if abs(self.max_volt)>199:
-            self.max_volt=199
-        self.dialogue_queue.put(f'Max voltage allowed is {self.max_volt}')
-        self.startI=float(self.start_box.get())
-        self.endI=float(self.end_box.get())
-        self.prename=self.sample_box.get()
-        self.val=self.CheckVar1.get()
-        if self.startI>self.endI:
-            self.startI, self.endI=self.endI, self.startI
-        self.sourcemeter.reset()
-        self.sourcemeter.use_front_terminals()
-        if self.four_wire_var.get() == 1:
-            self.sourcemeter.adapter.write("SYST:RSEN ON")
-            self.dialogue_queue.put("4-wire sensing enabled.")
-        else:
-            self.sourcemeter.adapter.write("SYST:RSEN OFF")
-            self.dialogue_queue.put("4-wire sensing disabled.")
-        time.sleep(0.1)
-        self.sourcemeter.apply_current()
-        self.sourcemeter.compliance_voltage=self.max_volt
-        self.sourcemeter.measure_voltage(voltage=self.max_volt, auto_range=True)
-        time.sleep(0.1) # wait here to give the instrument time to react
-        self.sourcemeter.config_buffer(self.averages)
-        self.sourcemeter.enable_source()
-        time.sleep(0.1)
-        self.dialogue_queue.put('Sourcemeter is ready')
-        if self.val==1:
-            startnode=float(self.startnode.get())
-            highnode=float(self.highnode.get())
-            lownode=float(self.lownode.get())
-            step_val=float(self.stepsize.get())
-            amp1=np.arange(startnode,highnode,step_val)
-            amp2=np.arange(highnode,lownode,-1*step_val)
-            amp3=np.arange(lownode,startnode+step_val,step_val)
-            numberofloops=int(self.loopno.get())
-            self.amps=np.concatenate((amp1, amp2, amp3))
-            ampscopy=self.amps.copy()
-            for n in range(numberofloops-1):      
-                self.amps=np.concatenate((self.amps,ampscopy))
-        else:
-        # Allocate arrays to store the measurement results
-            self.amps = np.linspace(self.startI, self.endI, num=int(self.data_points))
-        self.run_amps()
-        self.set_controls_state(NORMAL)
+        try:
+            self.dialogue_queue.put('Setting up measurement')
+            self.running=True
+            self.sweep=True
+            self.queue=queue
+            self.data_points = int(self.step_box.get())
+            self.averages = int(self.ave_box.get())
+            self.max_volt = float(self.vlimit_box.get())
+            if abs(self.max_volt)>199:
+                self.max_volt=199
+            self.dialogue_queue.put(f'Max voltage allowed is {self.max_volt}')
+            self.startI=float(self.start_box.get())
+            self.endI=float(self.end_box.get())
+            self.prename=self.sample_box.get()
+            self.val=self.CheckVar1.get()
+            if self.startI>self.endI:
+                self.startI, self.endI=self.endI, self.startI
+            self.sourcemeter.reset()
+            self.sourcemeter.use_front_terminals()
+            if self.four_wire_var.get() == 1:
+                self.sourcemeter.adapter.write("SYST:RSEN ON")
+                self.dialogue_queue.put("4-wire sensing enabled.")
+            else:
+                self.sourcemeter.adapter.write("SYST:RSEN OFF")
+                self.dialogue_queue.put("4-wire sensing disabled.")
+            time.sleep(0.1)
+            self.sourcemeter.apply_current()
+            self.sourcemeter.compliance_voltage=self.max_volt
+            # --- Voltage ---
+            selected_v_range = self.voltage_range_var.get()
+            if selected_v_range == "auto":
+                self.sourcemeter.measure_voltage(auto_range=True)
+            else:
+                self.sourcemeter.measure_voltage(voltage=float(selected_v_range), auto_range=False)
+    
+            time.sleep(0.1) # wait here to give the instrument time to react
+            self.sourcemeter.config_buffer(self.averages)
+            self.sourcemeter.enable_source()
+            time.sleep(0.1)
+            self.dialogue_queue.put('Sourcemeter is ready')
+            if self.val==1:
+                startnode=float(self.startnode.get())
+                highnode=float(self.highnode.get())
+                lownode=float(self.lownode.get())
+                step_val=float(self.stepsize.get())
+                amp1=np.arange(startnode,highnode,step_val)
+                amp2=np.arange(highnode,lownode,-1*step_val)
+                amp3=np.arange(lownode,startnode+step_val,step_val)
+                numberofloops=int(self.loopno.get())
+                self.amps=np.concatenate((amp1, amp2, amp3))
+                ampscopy=self.amps.copy()
+                for n in range(numberofloops-1):      
+                    self.amps=np.concatenate((self.amps,ampscopy))
+            else:
+            # Allocate arrays to store the measurement results
+                self.amps = np.linspace(self.startI, self.endI, num=int(self.data_points))
+            self.run_amps()
+            self.set_controls_state(NORMAL)
+        except Exception as e:
+            self.dialogue_queue.put(f"Error during measurement: {e}")
+        finally:
+            self.set_controls_state(NORMAL)
+            self.running = False
         
     def run_amps(self):
         
@@ -189,11 +218,21 @@ class IVsweep4probe():
         })
         # create a file name usine time date save it to the py code path.
         name = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S.csv")
-        
-        full_filename = os.path.join(self.save_dir.get(), self.sample_box.get() + name)
+        raw_name = self.sample_box.get()
+        save_path = self.save_dir.get()
+        safe_name = self.sanitize_filename(raw_name)
+        full_filename = os.path.join(save_path, safe_name + '_' + name)
+    
         df=pd.DataFrame(data)
         df.to_csv(full_filename)
         self.dialogue_queue.put(f'Data saved to{full_filename}')
+        # Define the JSON settings filename
+        settings_filename = full_filename.replace(".csv", "_settings.json")
+        
+        # Save current settings using your existing method
+        with open(settings_filename, 'w') as f:
+            json.dump(self.get_settings_dict(), f, indent=4)
+        self.dialogue_queue.put(f'Settings saved to{settings_filename}')
         self.running=False
         
         
@@ -218,7 +257,11 @@ class Set_voltage:
             self.sourcemeter.adapter.write("SYST:RSEN OFF")
             self.dialogue_queue.put("4-wire sensing disabled (manual voltage).")
         self.sourcemeter.apply_voltage()
-        self.sourcemeter.measure_current(nplc=1,current=self.max_current, auto_range=0.1)
+        selected_i_range = self.current_range_var.get()
+        if selected_i_range == "auto":
+            self.sourcemeter.measure_current(auto_range=True)
+        else:
+            self.sourcemeter.measure_current(current=float(selected_i_range), auto_range=False)
         self.sourcemeter.compliance_current=self.max_current
         time.sleep(0.1) # wait here to give the instrument time to react
         self.sourcemeter.sample_continuously()
@@ -291,7 +334,11 @@ class Log_current:
         time.sleep(0.1) 
         self.sourcemeter.source_mode = 'voltage'
         time.sleep(0.1) 
-        self.sourcemeter.measure_current(nplc=0.01,current=self.max_current, auto_range=0.1)
+        selected_i_range = self.current_range_var.get()
+        if selected_i_range == "auto":
+            self.sourcemeter.measure_current(auto_range=True)
+        else:
+            self.sourcemeter.measure_current(nplc=0.01, current=float(selected_i_range), auto_range=False)
         time.sleep(0.1) 
         self.sourcemeter.compliance_current=self.max_current
         time.sleep(0.1) # wait here to give the instrument time to react
@@ -340,16 +387,26 @@ class Log_current:
         })
         # create a file name usine time date save it to the py code path.
         name = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S.csv")
+        raw_name = self.f_name.get()
+        safe_name = self.sanitize_filename(raw_name)
+        
+        
         save_path = self.time_log_dir.get()
         if not save_path:
             self.dialogue_queue.put("No time log directory selected — using default path.")
             save_path = os.getcwd()
         
-        full_filename = os.path.join(save_path, self.f_name.get() + name)
+        full_filename = os.path.join(save_path, safe_name + '_' + name)
         
         data.to_csv(full_filename)
         self.dialogue_queue.put(f'Saved {full_filename}')
+        # Define the JSON settings filename
+        settings_filename = full_filename.replace(".csv", "_settings.json")
         
+        # Save current settings using your existing method
+        with open(settings_filename, 'w') as f:
+            json.dump(self.get_settings_dict(), f, indent=4)
+        self.dialogue_queue.put(f'Settings saved to {settings_filename}')
         
         
         
@@ -371,25 +428,25 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
         self.running=False
         
         # Inside frame1 is the IV selection
-        self.frame1=LabelFrame(self.master, text='Current Source: Sweep Settings', padx=10, pady=56)
+        self.frame1=LabelFrame(self.master, text='Current Source: I-V Sweep Settings', padx=10, pady=56)
         self.frame1.grid(column=1, row=0, padx=10, pady=10, sticky="n")
         self.I_label=Label(self.frame1,text='A', anchor='w')
         self.I_label.grid(column=2,row=0)
         self.start_label=Label(self.frame1,text='Start I (A)', anchor='e')
         self.start_label.grid(column=0,row=0,sticky='e')
-        self.start_box=Entry(self.frame1,width=12,justify='right')
+        self.start_box=Entry(self.frame1,width=6,justify='right')
         self.start_box.grid(column=1,row=0)
         self.start_box.insert(0,'0.0')
         self.I_label=Label(self.frame1,text='A', anchor='w')
         self.I_label.grid(column=2,row=1)
         self.end_label=Label(self.frame1,text='End I (A)',anchor='e')
         self.end_label.grid(column=0,row=1,sticky='e')
-        self.end_box=Entry(self.frame1,width=12,justify='right')
+        self.end_box=Entry(self.frame1,width=6,justify='right')
         self.end_box.insert(0,'1E-6')
         self.end_box.grid(column=1,row=1)
         self.step_label=Label(self.frame1,text='No. Data points',anchor='e')
         self.step_label.grid(column=0,row=2,sticky='e')
-        self.step_box=Entry(self.frame1,width=12,justify='right')
+        self.step_box=Entry(self.frame1,width=6,justify='right')
         self.step_box.grid(column=1,row=2)
         self.step_box.insert(0,'20')
         
@@ -405,10 +462,10 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
         self.n2_label.grid(column=0, row=0,sticky='e')
         self.n3_label.grid(column=0, row=1,sticky='e')
         self.n4_label.grid(column=0, row=3, sticky='e')
-        self.lownode=Entry(self.frame4, width=12, justify='right')
-        self.highnode=Entry(self.frame4, width=12, justify='right')
-        self.startnode=Entry(self.frame4, width=12, justify='right')
-        self.stepsize=Entry(self.frame4, width=12, justify='right')
+        self.lownode=Entry(self.frame4, width=6, justify='right')
+        self.highnode=Entry(self.frame4, width=6, justify='right')
+        self.startnode=Entry(self.frame4, width=6, justify='right')
+        self.stepsize=Entry(self.frame4, width=6, justify='right')
         self.lownode.insert(0,'-20E-7')
         self.highnode.insert(0,'20E-7')
         self.startnode.insert(0,'0.0')
@@ -417,7 +474,7 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
         self.startnode.grid(column=1, row=0)
         self.highnode.grid(column=1, row=1)
         self.stepsize.grid(column=1, row=3)
-        self.loopno=Entry(self.frame4,width=8,justify='right')
+        self.loopno=Entry(self.frame4,width=3,justify='right')
         self.loopno.grid(column=4,row=1)
         self.loopno.insert(0,'3')
         self.looplabel=Label(self.frame4, text='No. loops')
@@ -435,19 +492,19 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
         self.manual_4w_check.grid(column=0, row=6, columnspan=2, sticky='w')
         self.set_limit_label1=Label(self.frame2,text='Compliance Current (A)')
         self.set_limit_label1.grid(column=0, row=0,sticky='e')
-        self.Vlimit_box=Entry(self.frame2,width=12,justify='right')
+        self.Vlimit_box=Entry(self.frame2,width=6,justify='right')
         self.Vlimit_box.grid(column=1,row=0)
         self.Vlimit_box.insert(0,'1.0')
         
         self.set_volts_label1=Label(self.frame2,text='Voltage (V)')
         self.set_volts_label1.grid(column=0, row=1,sticky='e')
-        self.V_box=Entry(self.frame2,width=12,justify='right')
+        self.V_box=Entry(self.frame2,width=6,justify='right')
         self.V_box.grid(column=1,row=1)
         self.V_box.insert(0,'1.00')
         
         self.V_label1=Label(self.frame2,text='Step +/- (V)')
         self.V_label1.grid(column=0,row=2,sticky='e')
-        self.V_step_box=Entry(self.frame2,width=12,justify='right')
+        self.V_step_box=Entry(self.frame2,width=6,justify='right')
         self.V_step_box.grid(column=1,row=2)
         self.V_step_box.insert(0,'0.1')
         
@@ -485,12 +542,12 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
         
         self.vlimit_label=Label(self.frame6,text='Voltage Limit (V)',anchor='e')
         self.vlimit_label.grid(column=0,row=2)
-        self.vlimit_box=Entry(self.frame6,width=12,justify='right')
+        self.vlimit_box=Entry(self.frame6,width=6,justify='right')
         self.vlimit_box.grid(column=1,row=2,sticky='w')
         self.vlimit_box.insert(0,'50')
         self.ave_label=Label(self.frame6,text='Buffer size',anchor='e')
         self.ave_label.grid(column=0,row=3)
-        self.ave_box=Entry(self.frame6,width=8,justify='right')
+        self.ave_box=Entry(self.frame6,width=6,justify='right')
         self.ave_box.insert(0,'10')
         self.ave_box.grid(column=1,row=3,sticky='w')
         
@@ -504,7 +561,7 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
             variable=self.four_wire_time
         )
         self.time_4w_check.grid(column=0, row=10, columnspan=3, sticky='w')
-        self.volts_set=Entry(self.frame7,width=5)
+        self.volts_set=Entry(self.frame7,width=6,justify='right')
         self.volts_set.grid(column=1, row=0)
         self.volts_label=Label(self.frame7,text='Apply Voltage (V)',anchor='e')
         self.volts_label.grid(column=0, row=0)
@@ -519,37 +576,37 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
 
         # Voltage Start
         Label(self.frame_voltage_sweep, text='Start V:').grid(row=0, column=0, sticky='e')
-        self.vsweep_start = Entry(self.frame_voltage_sweep, width=10, justify='right')
+        self.vsweep_start = Entry(self.frame_voltage_sweep, width=6, justify='right')
         self.vsweep_start.grid(row=0, column=1)
         self.vsweep_start.insert(0, '0.0')
         
         # Voltage End
         Label(self.frame_voltage_sweep, text='End V:').grid(row=1, column=0, sticky='e')
-        self.vsweep_end = Entry(self.frame_voltage_sweep, width=10, justify='right')
+        self.vsweep_end = Entry(self.frame_voltage_sweep, width=6, justify='right')
         self.vsweep_end.grid(row=1, column=1)
         self.vsweep_end.insert(0, '10.0')
         
         # Number of Points
         Label(self.frame_voltage_sweep, text='Data Points:').grid(row=2, column=0, sticky='e')
-        self.vsweep_points = Entry(self.frame_voltage_sweep, width=10, justify='right')
+        self.vsweep_points = Entry(self.frame_voltage_sweep, width=6, justify='right')
         self.vsweep_points.grid(row=2, column=1)
         self.vsweep_points.insert(0, '20')
         
         # Buffer Size
         Label(self.frame_voltage_sweep, text='Buffer Size:').grid(row=3, column=0, sticky='e')
-        self.vsweep_buffer = Entry(self.frame_voltage_sweep, width=10, justify='right')
+        self.vsweep_buffer = Entry(self.frame_voltage_sweep, width=6, justify='right')
         self.vsweep_buffer.grid(row=3, column=1)
         self.vsweep_buffer.insert(0, '10')
         
         # Compliance Current
         Label(self.frame_voltage_sweep, text='Compliance I (A):').grid(row=4, column=0, sticky='e')
-        self.vsweep_compliance = Entry(self.frame_voltage_sweep, width=10, justify='right')
+        self.vsweep_compliance = Entry(self.frame_voltage_sweep, width=6, justify='right')
         self.vsweep_compliance.grid(row=4, column=1)
         self.vsweep_compliance.insert(0, '0.1')
         
         # Sample Name
         Label(self.frame_voltage_sweep, text='Sample Name:').grid(row=5, column=0, sticky='e')
-        self.vsweep_sample = Entry(self.frame_voltage_sweep, width=20)
+        self.vsweep_sample = Entry(self.frame_voltage_sweep, width=25)
         self.vsweep_sample.grid(row=5, column=1, columnspan=2)
         
         
@@ -581,7 +638,7 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
         
                 
         # Set complicance current
-        self.currentmax_set=Entry(self.frame7,width=5)
+        self.currentmax_set=Entry(self.frame7,width=6,justify='right')
         self.currentmax_set.grid(column=1, row=1)
         self.currentmax_label=Label(self.frame7,text='Current Compliance (A)',anchor='e')
         
@@ -589,7 +646,7 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
        
         
         #Set time interval
-        self.time_inter_set=Entry(self.frame7,width=5)
+        self.time_inter_set=Entry(self.frame7,width=6,justify='right')
         self.time_inter_set.grid(column=1, row=2)
         self.time_inter_label=Label(self.frame7,text='Approx Time Interval (s)',anchor='e')
         
@@ -597,14 +654,14 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
        
         
         #Set file name
-        self.f_name=Entry(self.frame7,width=10)
+        self.f_name=Entry(self.frame7,width=25)
         self.f_name.grid(column=1, row=4,columnspan=3)
         self.f_name_label=Label(self.frame7,text='Log name',anchor='e')
         self.f_name_label.grid(column=0, row=4)
         
         
         #Set time interval
-        self.time_stop_set=Entry(self.frame7,width=5)
+        self.time_stop_set=Entry(self.frame7,width=6,justify='right')
         self.time_stop_set.grid(column=1, row=3)
         self.time_stop_label=Label(self.frame7,text='End After (s)',anchor='e')
         
@@ -647,6 +704,28 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
         self.connection_status.pack()
         self.disconnectbutton.pack()
         
+        
+        # Enble setting the sensitivity
+        self.range_frame = LabelFrame(self.master, text='Voltage and Current Sensitivity Range', pady=10, padx=10)
+        self.range_frame.grid(column=0, row=1, padx=10, pady=10, sticky='n')
+        
+        # Variables to hold the selected range
+        self.voltage_range_var = StringVar(value="auto")
+        self.current_range_var = StringVar(value="auto")
+        
+        # Voltage Range Selection
+        Label(self.range_frame, text="Voltage Range:").grid(row=0, column=0, sticky='w')
+        voltage_ranges_sen = [("Auto", "auto"), ("0.2 V", "0.2"), ("2 V", "2"), ("20 V", "20"), ("200 V", "200")]
+        for i, (label, val) in enumerate(voltage_ranges_sen):
+            Radiobutton(self.range_frame, text=label, variable=self.voltage_range_var, value=val).grid(row=i+1, column=0, sticky='w')
+        
+        # Current Range Selection
+        Label(self.range_frame, text="Current Range:").grid(row=0, column=1, sticky='w', padx=(20, 0))
+        current_ranges_sen = [("Auto", "auto"), ("1 µA", "1e-6"), ("10 µA", "1e-5"), ("100 µA", "1e-4"),
+                          ("1 mA", "1e-3"), ("10 mA", "1e-2"), ("100 mA", "1e-1"), ("1 A", "1.0")]
+        for i, (label, val) in enumerate(current_ranges_sen):
+            Radiobutton(self.range_frame, text=label, variable=self.current_range_var, value=val).grid(row=i+1, column=1, sticky='w', padx=(20, 0))
+
         # Start a thread to process dialog messages
         self.workerthread = Thread(target=self.dialogue_queue_worker, daemon=True)
         self.workerthread.start()
@@ -686,18 +765,15 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
         self.load_button = Button(self.frame9, text="Load Settings", command=self.load_settings)
         self.load_button.pack(pady=(0, 10), fill='x')
 
-        
-        # for i in range(4):  # 4 columns
-        #     self.master.grid_columnconfigure(i, weight=1, uniform='col')
-
-        # for j in range(2):  # 2 rows
-        #     self.master.grid_rowconfigure(j, weight=1, uniform='row')
-        
         self.stop_button.config(state=DISABLED)
         self.vsweep_stop.config(state=DISABLED)
         self.timelogstop_button.config(state=DISABLED)
         super().__init__()
-        
+    
+    def sanitize_filename(self, name):
+        """Return a safe filename by replacing invalid characters."""
+        return re.sub(r'[^\w\-_. ]', '_', name)
+   
     def get_settings_dict(self):
         return {
             "IV_sweep": {
@@ -741,7 +817,13 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
                 "sample_name": self.vsweep_sample.get(),
                 "save_dir": self.vsweep_save_dir.get(),
                 "four_wire": self.vsweep_4w_var.get()
+            },
+   
+            "sensitivity": {
+                "voltage_range": self.voltage_range_var.get(),
+                "current_range": self.current_range_var.get()
             }
+
         }
 
 
@@ -812,6 +894,11 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
             self.vsweep_sample.insert(0, data["voltage_sweep"]["sample_name"])
             self.vsweep_save_dir.set(data["voltage_sweep"]["save_dir"])
             self.vsweep_4w_var.set(data["voltage_sweep"].get("four_wire", 0))
+            
+            # Sensitivity settings
+            self.voltage_range_var.set(data.get("sensitivity", {}).get("voltage_range", "auto"))
+            self.current_range_var.set(data.get("sensitivity", {}).get("current_range", "auto"))
+
     
             self.dialogue_queue.put("Settings loaded successfully.")
         except Exception as e:
@@ -1093,6 +1180,11 @@ class ConnectKeithley:
             
 if __name__=='__main__':   
     
+    try:
+        del enumerate  # if it's been overridden
+    except:
+        pass
+    
     def on_closing():
         if messagebox.askokcancel("Quit", "Do you want to quit?"):
             try:
@@ -1107,7 +1199,6 @@ if __name__=='__main__':
     
     warnings.filterwarnings("ignore", category=UserWarning, module='pyvisa_py.tcpip')
     sourcemeter=None         
-
     root=Tk()
     
     app=App(root, sourcemeter)
