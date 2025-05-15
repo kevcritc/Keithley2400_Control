@@ -553,7 +553,7 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
         # Time based logging
         self.frame7=LabelFrame(self.master, text='Voltage Source: Log Current over time', pady=18)
         self.frame7.grid(column=2,row=1, padx=10, pady=8, sticky="n")
-        self.four_wire_time = IntVar(value=1)
+        self.four_wire_time = IntVar(value=0)
         self.time_4w_check = Checkbutton(
             self.frame7,
             text="Enable 4-wire sensing",
