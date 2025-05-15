@@ -363,14 +363,14 @@ class Log_current:
         
         while self.running:
             
-            self.currentlog.append(np.mean(self.sourcemeter.current))
-            self.currentlogstd.append(np.std(self.sourcemeter.current)/np.sqrt(len(self.sourcemeter.current)))
+            current = self.sourcemeter.current
+            self.currentlog.append(current)
             current_time = time.time()
             self.timelog.append(current_time-start_time)
             time.sleep(inter_mod)
             if current_time-start_time>self.maxtime:
                 self.stop_voltage()
-            data=[self.timelog,self.currentlog,self.currentlogstd]
+            data=[self.timelog,self.currentlog]
             self.time_data_queue.put(data)
         self.dialogue_queue.put('Stopped')
         self.set_controls_state(NORMAL)
@@ -381,8 +381,7 @@ class Log_current:
         data = pd.DataFrame({
             
             'Time (s)': self.timelog,
-            'Current (A)': self.currentlog,
-            'Current error (A)': self.currentlogstd
+            'Current (A)': self.currentlog
             
         })
         # create a file name usine time date save it to the py code path.
@@ -554,7 +553,7 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
         # Time based logging
         self.frame7=LabelFrame(self.master, text='Voltage Source: Log Current over time', pady=18)
         self.frame7.grid(column=2,row=1, padx=10, pady=8, sticky="n")
-        self.four_wire_time = IntVar(value=0)
+        self.four_wire_time = IntVar(value=1)
         self.time_4w_check = Checkbutton(
             self.frame7,
             text="Enable 4-wire sensing",
@@ -1056,7 +1055,7 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
                 data = self.time_data_queue.get()
                 ax.clear()
                 
-                ax.errorbar(data[0], data[1], yerr=data[2],color='black', marker='o')
+                ax.plot(data[0], data[1],color='black', marker='o')
                 ax.set_xlabel('Time /s')
                 ax.set_ylabel('Current /A')
                   
@@ -1205,3 +1204,7 @@ if __name__=='__main__':
     root.protocol("WM_DELETE_WINDOW", on_closing)
     mainloop()
     
+    
+
+        
+        
