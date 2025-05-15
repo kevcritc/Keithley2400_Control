@@ -547,7 +547,7 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
         self.val=self.CheckVar1.get()
         self.sweep_stop_button = Button(self.frame6, text='Stop', command=self.stop_voltage)
         self.sweep_stop_button.grid(column=0, row=6, columnspan=3, sticky='ew', pady=(2, 5))
-
+        self.sweep_stop_button.config(state=DISABLED)
         
         self.vlimit_label=Label(self.frame6,text='Voltage Limit (V)',anchor='e')
         self.vlimit_label.grid(column=0,row=2)
@@ -968,6 +968,7 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
             self.stop_button.config(state=NORMAL)
             self.vsweep_stop.config(state=NORMAL)
             self.timelogstop_button.config(state=NORMAL)
+            self.sweep_stop_button.config(state=NORMAL)
         else:
             self.dialogue_queue.put("Keithley connection failed.")
             self.connection_status.config(text="Not Connected", fg="red")
@@ -1215,3 +1216,5 @@ if __name__=='__main__':
     app=App(root, sourcemeter)
     root.protocol("WM_DELETE_WINDOW", on_closing)
     mainloop()
+    
+    
