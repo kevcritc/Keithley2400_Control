@@ -329,8 +329,8 @@ class Log_current:
             self.dialogue_queue.put("4-wire sensing disabled (time log).")
         time.sleep(0.1)  
         self.sourcemeter.apply_voltage()
-        
-
+       
+    
         time.sleep(0.1) 
         self.sourcemeter.source_mode = 'voltage'
         time.sleep(0.1) 
@@ -341,6 +341,8 @@ class Log_current:
             self.sourcemeter.measure_current(nplc=0.01, current=float(selected_i_range), auto_range=False)
         time.sleep(0.1) 
         self.sourcemeter.compliance_current=self.max_current
+        buffer_size = int(self.time_buffer_set.get())
+        self.sourcemeter.config_buffer(buffer_size)
         time.sleep(0.1) # wait here to give the instrument time to react
         self.dialogue_queue.put('Starting..')
         self.maxtime=int(self.time_stop_set.get())
@@ -363,14 +365,19 @@ class Log_current:
         
         while self.running:
             
-            current = self.sourcemeter.current
-            self.currentlog.append(current)
+            current_samples = np.array(self.sourcemeter.current)
+            self.currentlog.append(np.mean(current_samples))
+            try:
+                self.currentlogstd.append(np.std(current_samples) / np.sqrt(len(current_samples)))
+            except:
+                self.currentlogstd.append(0)
+                
             current_time = time.time()
             self.timelog.append(current_time-start_time)
             time.sleep(inter_mod)
             if current_time-start_time>self.maxtime:
                 self.stop_voltage()
-            data=[self.timelog,self.currentlog]
+            data=[self.timelog,self.currentlog,self.currentlogstd]
             self.time_data_queue.put(data)
         self.dialogue_queue.put('Stopped')
         self.set_controls_state(NORMAL)
@@ -381,7 +388,8 @@ class Log_current:
         data = pd.DataFrame({
             
             'Time (s)': self.timelog,
-            'Current (A)': self.currentlog
+            'Current (A)': self.currentlog,
+            'Current error (A)': self.currentlogstd
             
         })
         # create a file name usine time date save it to the py code path.
@@ -449,11 +457,11 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
         self.step_box.grid(column=1,row=2)
         self.step_box.insert(0,'20')
         
+        
         # Loop control
         self.frame4=LabelFrame(self.master, text='Current Source: Full Loop Control', padx=10, pady=42)
         self.frame4.grid(column=2,row=0,  padx=10, pady=10, sticky="n")
-        
-        self.n1_label=Label(self.frame4,text='I min (A)')
+        self.n1_label=Label(self.frame4,text='I_min (A)')
         self.n2_label=Label(self.frame4,text='I start (A)')
         self.n3_label=Label(self.frame4,text='I max (A)')
         self.n4_label=Label(self.frame4,text='I step (A)')
@@ -524,8 +532,7 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
         self.frame6.grid(column=1,row=1, padx=10, pady=10, sticky="n")
         self.four_wire_var = IntVar(value=1)
         self.four_wire_check = Checkbutton(self.frame6, text='Enable 4-wire sensing', variable=self.four_wire_var)
-        self.four_wire_check.grid(column=0, row=8, columnspan=3, sticky='w')
-
+        self.four_wire_check.grid(column=0, row=9, columnspan=3, sticky='w')
         self.sample_label=Label(self.frame6,text='Sample Name',anchor='e')
         self.sample_label.grid(column=0,row=4)
         self.sample_box=Entry(self.frame6,width=20)
@@ -538,6 +545,9 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
         self.check.grid(column=0, row=0, columnspan=3)
         self.check1.grid(column=0, row=1, columnspan=3)
         self.val=self.CheckVar1.get()
+        self.sweep_stop_button = Button(self.frame6, text='Stop', command=self.stop_voltage)
+        self.sweep_stop_button.grid(column=0, row=6, columnspan=3, sticky='ew', pady=(2, 5))
+
         
         self.vlimit_label=Label(self.frame6,text='Voltage Limit (V)',anchor='e')
         self.vlimit_label.grid(column=0,row=2)
@@ -549,6 +559,17 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
         self.ave_box=Entry(self.frame6,width=6,justify='right')
         self.ave_box.insert(0,'10')
         self.ave_box.grid(column=1,row=3,sticky='w')
+        # Save Directory Selection
+        self.save_dir = StringVar()
+        self.save_dir.set("")  # Default to blank until user sets
+        
+        self.save_dir_label = Label(self.frame6, text="Save Directory:")
+        self.save_dir_label.grid(column=0, row=7, sticky='e')
+        self.save_dir_entry = Entry(self.frame6, textvariable=self.save_dir, width=25)
+        self.save_dir_entry.grid(column=1, row=7, columnspan=2, sticky='w')
+        
+        self.select_dir_button = Button(self.frame6, text="Browse...", command=self.select_save_directory)
+        self.select_dir_button.grid(column=0, row=8, columnspan=3, sticky='ew')
         
         # Time based logging
         self.frame7=LabelFrame(self.master, text='Voltage Source: Log Current over time', pady=18)
@@ -564,21 +585,57 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
         self.volts_set.grid(column=1, row=0)
         self.volts_label=Label(self.frame7,text='Apply Voltage (V)',anchor='e')
         self.volts_label.grid(column=0, row=0)
+        # Set complicance current
+        self.currentmax_set=Entry(self.frame7,width=6,justify='right')
+        self.currentmax_set.grid(column=1, row=1)
+        self.currentmax_label=Label(self.frame7,text='Current Compliance (A)',anchor='e')
         
+        self.currentmax_label.grid(column=0, row=1)
+       
+        
+        #Set time interval
+        self.time_inter_set=Entry(self.frame7,width=6,justify='right')
+        self.time_inter_set.grid(column=1, row=2)
+        self.time_inter_label=Label(self.frame7,text='Approx Time Interval (s)',anchor='e')
+        
+        self.time_inter_label.grid(column=0, row=2)
+       
+        
+        #Set file name
+        self.f_name=Entry(self.frame7,width=25)
+        self.f_name.grid(column=1, row=5,columnspan=3)
+        self.f_name_label=Label(self.frame7,text='Log name',anchor='e')
+        self.f_name_label.grid(column=0, row=5)
+        
+        
+        #Set time interval
+        self.time_stop_set=Entry(self.frame7,width=6,justify='right')
+        self.time_stop_set.grid(column=1, row=3)
+        self.time_stop_label=Label(self.frame7,text='End After (s)',anchor='e')
+        
+        self.time_stop_label.grid(column=0, row=3)
+        #Set initial values
+        self.volts_set.insert(0,'5')
+        self.currentmax_set.insert(0, '0.1')
+        self.time_inter_set.insert(0,'1')
+        self.time_stop_set.insert(0,'3600')
+        
+        
+        #Start stop buttons
+        self.timelogstart_button=Button(self.frame7,text='Start', command=self.log_time_thread)
+        self.timelogstop_button=Button(self.frame7,text='Stop', command=self.stop_voltage)
+        self.timelogstart_button.grid(column=0,row=6, columnspan=3,sticky='ew')   
+        self.timelogstop_button.grid(column=0,row=7, columnspan=3,sticky='ew')   
         
         #Frame for voltage sweep
         
         self.frame_voltage_sweep = LabelFrame(self.master, text='Voltage Source Sweep', pady=18, padx=10)
         self.frame_voltage_sweep.grid(column=3, row=1, padx=10, pady=10, sticky="n")
-        
-
-
         # Voltage Start
         Label(self.frame_voltage_sweep, text='Start V:').grid(row=0, column=0, sticky='e')
         self.vsweep_start = Entry(self.frame_voltage_sweep, width=6, justify='right')
         self.vsweep_start.grid(row=0, column=1)
         self.vsweep_start.insert(0, '0.0')
-        
         # Voltage End
         Label(self.frame_voltage_sweep, text='End V:').grid(row=1, column=0, sticky='e')
         self.vsweep_end = Entry(self.frame_voltage_sweep, width=6, justify='right')
@@ -634,52 +691,8 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
         self.vsweep_stop = Button(self.frame_voltage_sweep, text='Stop', command=self.stop_voltage)
         self.vsweep_stop.grid(row=10, column=0, columnspan=3, sticky='ew')
         
-        
-                
-        # Set complicance current
-        self.currentmax_set=Entry(self.frame7,width=6,justify='right')
-        self.currentmax_set.grid(column=1, row=1)
-        self.currentmax_label=Label(self.frame7,text='Current Compliance (A)',anchor='e')
-        
-        self.currentmax_label.grid(column=0, row=1)
-       
-        
-        #Set time interval
-        self.time_inter_set=Entry(self.frame7,width=6,justify='right')
-        self.time_inter_set.grid(column=1, row=2)
-        self.time_inter_label=Label(self.frame7,text='Approx Time Interval (s)',anchor='e')
-        
-        self.time_inter_label.grid(column=0, row=2)
-       
-        
-        #Set file name
-        self.f_name=Entry(self.frame7,width=25)
-        self.f_name.grid(column=1, row=4,columnspan=3)
-        self.f_name_label=Label(self.frame7,text='Log name',anchor='e')
-        self.f_name_label.grid(column=0, row=4)
-        
-        
-        #Set time interval
-        self.time_stop_set=Entry(self.frame7,width=6,justify='right')
-        self.time_stop_set.grid(column=1, row=3)
-        self.time_stop_label=Label(self.frame7,text='End After (s)',anchor='e')
-        
-        self.time_stop_label.grid(column=0, row=3)
-        
-        
-        
-        #Set initial values
-        self.volts_set.insert(0,'5')
-        self.currentmax_set.insert(0, '0.1')
-        self.time_inter_set.insert(0,'1')
-        self.time_stop_set.insert(0,'3600')
-        
-        
-        #Start stop buttons
-        self.timelogstart_button=Button(self.frame7,text='Start', command=self.log_time_thread)
-        self.timelogstop_button=Button(self.frame7,text='Stop', command=self.stop_voltage)
-        self.timelogstart_button.grid(column=0,row=5, columnspan=3,sticky='ew')   
-        self.timelogstop_button.grid(column=0,row=6, columnspan=3,sticky='ew')                           
+    
+                                
         
         self.frame8=LabelFrame(self.master, text='Update', pady=18)
         self.frame8.grid(column=1, row=2, padx=10, columnspan=3, pady=10, sticky="n")
@@ -690,6 +703,13 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
         self.scrollbar.pack(side=RIGHT, fill=Y)
         self.dialogbox.config(yscrollcommand=self.scrollbar.set)
         
+        # Buffer Size Entry
+        self.time_buffer_label = Label(self.frame7, text="Buffer Size:")
+        self.time_buffer_label.grid(column=0, row=4, sticky='e')
+        
+        self.time_buffer_set = Entry(self.frame7, width=6, justify='right')
+        self.time_buffer_set.grid(column=1, row=4)
+        self.time_buffer_set.insert(0, '10')  # default value
         
         # connect to Keighley
         
@@ -731,30 +751,20 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
         
         
         
-        # Save Directory Selection
-        self.save_dir = StringVar()
-        self.save_dir.set("")  # Default to blank until user sets
         
-        self.save_dir_label = Label(self.frame6, text="Save Directory:")
-        self.save_dir_label.grid(column=0, row=6, sticky='e')
-        self.save_dir_entry = Entry(self.frame6, textvariable=self.save_dir, width=25)
-        self.save_dir_entry.grid(column=1, row=6, columnspan=2, sticky='w')
-        
-        self.select_dir_button = Button(self.frame6, text="Browse...", command=self.select_save_directory)
-        self.select_dir_button.grid(column=0, row=7, columnspan=3, sticky='ew')
         
         # Time Log Save Directory Selection
         self.time_log_dir = StringVar()
         self.time_log_dir.set("")
         
         self.time_log_dir_label = Label(self.frame7, text="Time Log Directory:")
-        self.time_log_dir_label.grid(column=0, row=7, sticky='e')
+        self.time_log_dir_label.grid(column=0, row=8, sticky='e')
         
         self.time_log_dir_entry = Entry(self.frame7, textvariable=self.time_log_dir, width=25)
-        self.time_log_dir_entry.grid(column=1, row=7, columnspan=2, sticky='w')
+        self.time_log_dir_entry.grid(column=1, row=8, columnspan=2, sticky='w')
         
         self.select_time_dir_button = Button(self.frame7, text="Browse...", command=self.select_time_log_directory)
-        self.select_time_dir_button.grid(column=0, row=8, columnspan=3, sticky='ew')
+        self.select_time_dir_button.grid(column=0, row=9, columnspan=3, sticky='ew')
         self.set_controls_state(DISABLED)
         
         # Save/Load Settings Buttons
@@ -805,7 +815,8 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
                 "interval": self.time_inter_set.get(),
                 "duration": self.time_stop_set.get(),
                 "filename": self.f_name.get(),
-                "four_wire": self.four_wire_time.get()
+                "four_wire": self.four_wire_time.get(),
+                "buffer": self.time_buffer_set.get()
             },
             "voltage_sweep": {
                 "start": self.vsweep_start.get(),
@@ -877,7 +888,8 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
             self.f_name.delete(0, END)
             self.f_name.insert(0, data["time_log"]["filename"])
             self.four_wire_time.set(data["time_log"].get("four_wire", 0))
-    
+            self.time_buffer_set.delete(0, END)
+            self.time_buffer_set.insert(0, data["time_log"].get("buffer", "10"))
             # Voltage sweep
             self.vsweep_start.delete(0, END)
             self.vsweep_start.insert(0, data["voltage_sweep"]["start"])
@@ -1055,7 +1067,7 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
                 data = self.time_data_queue.get()
                 ax.clear()
                 
-                ax.plot(data[0], data[1],color='black', marker='o')
+                ax.errorbar(data[0], data[1], yerr=data[2], color='black', marker='o')
                 ax.set_xlabel('Time /s')
                 ax.set_ylabel('Current /A')
                   
@@ -1203,8 +1215,3 @@ if __name__=='__main__':
     app=App(root, sourcemeter)
     root.protocol("WM_DELETE_WINDOW", on_closing)
     mainloop()
-    
-    
-
-        
-        
