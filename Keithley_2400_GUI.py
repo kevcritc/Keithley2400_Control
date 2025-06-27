@@ -364,13 +364,21 @@ class Log_current:
             
         
         while self.running:
+            try:
+                # Drain the instrument’s buffer
+                current_samples = np.array(self.sourcemeter.current)
+                self.currentlog.append(np.mean(current_samples))
+            except visa.VisaIOError as e:
+                self.dialogue_queue.put(f"VISA error during read: {e}")
+                break
             
-            current_samples = np.array(self.sourcemeter.current)
-            self.currentlog.append(np.mean(current_samples))
             try:
                 self.currentlogstd.append(np.std(current_samples) / np.sqrt(len(current_samples)))
             except:
                 self.currentlogstd.append(0)
+            if self.sourcemeter.is_buffer_full():
+                self.sourcemeter.reset_buffer()
+                self.dialogue_queue.put('Resetting buffer')
                 
             current_time = time.time()
             self.timelog.append(current_time-start_time)
@@ -1218,3 +1226,6 @@ if __name__=='__main__':
     mainloop()
     
     
+
+        
+        
