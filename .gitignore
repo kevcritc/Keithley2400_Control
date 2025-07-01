@@ -20,7 +20,7 @@ config_local.py
 *.sqlite3
 *.log
 *.txt
-
+*.json
 # Token files
 *.pem
 *.key
