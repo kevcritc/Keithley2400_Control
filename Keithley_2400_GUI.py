@@ -8,6 +8,7 @@ Created on Fri Mar 18 18:23:27 2022
 from tkinter import *
 from queue import Queue
 from threading import *
+import logging
 import time
 import numpy as np
 import datetime
@@ -306,8 +307,31 @@ class Set_voltage:
 
 # Class for logging current for a voltage manually and steping.        
 class Log_current:
-    def log_I(self, time_data_queue):
+    # 1) Clear any existing handlers so basicConfig will take effect
+    root = logging.getLogger()
+    for h in list(root.handlers):
+        root.removeHandler(h)
+    
+    # 2) Build your timestamped filename next to this script
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    now      = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    logfile  = os.path.join(base_dir, f"testlog_{now}.txt")
+    
+    # 3) Configure logging to write *only* to that file
+    logging.basicConfig(
+        filename=logfile,
+        filemode="a",              # append; use "w" to overwrite each run
+        level=logging.DEBUG,
+        format="%(asctime)s %(name)s %(levelname)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    
+    # 4) Grab your module logger
+    logger = logging.getLogger(__name__)
+    def log_I(self, time_data_queue, resource):
+        self.resource=resource
         self.dialogue_queue.put('Initalising a time log')
+        self.logger.debug("Initialising",self.logfile)
         self.time_data_queue=time_data_queue
         self.currentlog=[]
         self.currentlogstd=[]
@@ -320,6 +344,7 @@ class Log_current:
         time.sleep(0.1) 
         self.sourcemeter.use_front_terminals()
         time.sleep(0.1) 
+        self.dialogue_queue.put('Front terminals set')
         
         if self.four_wire_time.get() == 1:
             self.sourcemeter.adapter.write("SYST:RSEN ON")
@@ -341,8 +366,8 @@ class Log_current:
             self.sourcemeter.measure_current(nplc=0.01, current=float(selected_i_range), auto_range=False)
         time.sleep(0.1) 
         self.sourcemeter.compliance_current=self.max_current
-        buffer_size = int(self.time_buffer_set.get())
-        self.sourcemeter.config_buffer(buffer_size)
+        self.buffer_size = int(self.time_buffer_set.get())
+        self.sourcemeter.config_buffer(self.buffer_size)
         time.sleep(0.1) # wait here to give the instrument time to react
         self.dialogue_queue.put('Starting..')
         self.maxtime=int(self.time_stop_set.get())
@@ -355,7 +380,7 @@ class Log_current:
         time.sleep(0.1)
         start_time = time.time()
         interval=float(self.time_inter_set.get())
-        
+        last_read    = start_time
         # fudge to get it 
         inter_mod=interval-0.7275
         if inter_mod<0:
@@ -369,8 +394,15 @@ class Log_current:
                 current_samples = np.array(self.sourcemeter.current)
                 self.currentlog.append(np.mean(current_samples))
             except visa.VisaIOError as e:
-                self.dialogue_queue.put(f"VISA error during read: {e}")
-                break
+                # catch the exact timeout code
+                if e.error_code == visa.constants.VI_ERROR_TMO:
+                    self.dialogue_queue.put("Timeout -> likely woke from sleep")
+                    self._reconnect()
+                    last_read = time.time()
+                    continue
+                else:
+                    self.dialogue_queue.put(f"VISA error: {e}")
+                    break
             
             try:
                 self.currentlogstd.append(np.std(current_samples) / np.sqrt(len(current_samples)))
@@ -379,8 +411,13 @@ class Log_current:
             if self.sourcemeter.is_buffer_full():
                 self.sourcemeter.reset_buffer()
                 self.dialogue_queue.put('Resetting buffer')
+                self.logger.debug('Resetting buffer')
+            errors=self.sourcemeter.check_errors()  
+            if len(errors)>0:
                 
+                self.logger.debug(f'Errors {errors}')
             current_time = time.time()
+            last_read = current_time
             self.timelog.append(current_time-start_time)
             time.sleep(inter_mod)
             if current_time-start_time>self.maxtime:
@@ -390,6 +427,37 @@ class Log_current:
         self.dialogue_queue.put('Stopped')
         self.set_controls_state(NORMAL)
         self.save_data()
+    def _reconnect(self):
+        """Close and reopen the VISA session & re-apply all settings."""
+        self.dialogue_queue.put("Reconnecting after sleep…")
+        # 1) tear down
+        try:
+            self.sourcemeter.disable_source()
+        except: pass
+        try:
+            self.sourcemeter.adapter.session.close()
+        except: pass
+
+        # 2) rebuild RM + adapter + sm
+        self.rm = visa.ResourceManager()
+        adapter = VISAAdapter(self.resource, timeout=2000)
+        self.sourcemeter = Keithley2400(adapter)
+
+        # 3) re-apply your config (4-wire, buffer, sample mode, voltage, ranges…)
+        self.sourcemeter.use_front_terminals()
+        if self.four_wire_time.get():
+            adapter.write("SYST:RSEN ON")
+        else:
+            adapter.write("SYST:RSEN OFF")
+        self.sourcemeter.apply_voltage()
+        self.sourcemeter.source_mode = 'voltage'
+        self.sourcemeter.compliance_current = self.max_current
+        self.sourcemeter.config_buffer(self.buffer_size)
+        self.sourcemeter.sample_continuously()
+        self.sourcemeter.source_voltage = self.setV
+        self.sourcemeter.enable_source()
+        time.sleep(0.1)
+        self.dialogue_queue.put("Reconnected and configured.")
         
     def save_data(self):
         self.dialogue_queue.put('Saving data')
@@ -430,7 +498,10 @@ class Log_current:
     
 
 class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
+    
     def __init__(self,master, sourcemeter):
+        self.resource=None
+        self.connection=None
         self.sourcemeter=sourcemeter
         self.statecol=NORMAL
         self.master=master
@@ -963,28 +1034,33 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
     
     def make_connection(self):
         self.connectionthread=Thread(target=self.connect,daemon=True)
+        
         self.connectionthread.start()
     
     def connect(self):
         
-        connection=ConnectKeithley(self.dialogue_queue)
-        self.query, self.sourcemeter=connection.find()
-        if self.query:
-            self.dialogue_queue.put("Keithley connection successful.")
-            self.connection_status.config(text="Connected", fg="green")
-            self.set_controls_state(NORMAL)
-            self.stop_button.config(state=NORMAL)
-            self.vsweep_stop.config(state=NORMAL)
-            self.timelogstop_button.config(state=NORMAL)
-            self.sweep_stop_button.config(state=NORMAL)
-        else:
-            self.dialogue_queue.put("Keithley connection failed.")
-            self.connection_status.config(text="Not Connected", fg="red")
-            self.set_controls_state(DISABLED)
-            self.stop_button.config(state=DISABLED)
-            self.vsweep_stop.config(state=DISABLED)
-            self.timelogstop_button.config(state=DISABLED)
-            
+        if self.connection==None:
+            self.connectbutton.config(state=DISABLED)
+            self.connection=ConnectKeithley(self.dialogue_queue,probe_timeout=1000)
+            self.query, self.sourcemeter, self.resource=self.connection.find()
+            if self.query:
+                self.dialogue_queue.put("Keithley connection successful.")
+                self.connection_status.config(text="Connected", fg="green")
+                self.set_controls_state(NORMAL)
+                self.stop_button.config(state=NORMAL)
+                self.vsweep_stop.config(state=NORMAL)
+                self.timelogstop_button.config(state=NORMAL)
+                self.sweep_stop_button.config(state=NORMAL)
+            else:
+                self.dialogue_queue.put("Keithley connection failed.")
+                self.connection_status.config(text="Not Connected", fg="red")
+                self.set_controls_state(DISABLED)
+                self.stop_button.config(state=DISABLED)
+                self.vsweep_stop.config(state=DISABLED)
+                self.timelogstop_button.config(state=DISABLED)
+            self.connectbutton.config(state=NORMAL)
+            if self.connection != None:
+                self.connection.set_timeout(50000)
     def disconnect(self):
         if self.sourcemeter:
             try:
@@ -998,10 +1074,12 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
                 self.dialogue_queue.put(f"Error during disconnect: {e}")
             finally:
                 self.sourcemeter = None
+                self.connection=None
                 self.query = False
                 self.set_controls_state(DISABLED)
         else:
             self.dialogue_queue.put("No Keithley connected.")
+            self.connection=None
 
    
     
@@ -1036,7 +1114,7 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
     def log_time_thread(self):
         if not self.running:
             self.running=True
-            self.t3=Thread(target=self.log_I, args=(self.time_data_queue,),daemon=True)
+            self.t3=Thread(target=self.log_I, args=(self.time_data_queue,self.resource),daemon=True)
             self.t3.start()
             self.set_controls_state(DISABLED)
             
@@ -1149,12 +1227,13 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
    
 
 class ConnectKeithley:
-    def __init__(self, dialogue_queue):
-        import pyvisa
-        self.rm = pyvisa.ResourceManager()
+    
+    def __init__(self, dialogue_queue,probe_timeout=1000):
+        self.rm = visa.ResourceManager()
         self.dialogue_queue = dialogue_queue
-
+        self.probe_timeout = probe_timeout
     def find(self):
+        self.finding=True
         self.devicelist = self.rm.list_resources()
         d_list = list(self.devicelist)
         d_list.reverse()  # optional: prioritize newer devices first
@@ -1163,12 +1242,12 @@ class ConnectKeithley:
         for resource in d_list:
             try:
                 self.dialogue_queue.put(f'Trying to connect to {resource}...')
-
+                
                 # Handle serial resources explicitly
                 if "ASRL" in resource or "COM" in resource:
                     adapter = VISAAdapter(
                         resource,
-                        timeout=10000,
+                        timeout=self.probe_timeout,
                         baud_rate=9600,
                         data_bits=8,
                         stop_bits=StopBits.one,
@@ -1178,25 +1257,34 @@ class ConnectKeithley:
                         read_termination="\r"
                     )
                 else:
-                    adapter = VISAAdapter(resource, timeout=10000)
+                    adapter = VISAAdapter(resource, timeout=self.probe_timeout)
 
-                sm = Keithley2400(adapter)
-                idn = sm.id.strip()
+                self.sm = Keithley2400(adapter)
+                idn = self.sm.id.strip()
                 self.dialogue_queue.put(f'Response: {idn}')
 
                 if "KEITHLEY" in idn and "2400" in idn:
                     self.dialogue_queue.put(f'Connected to Keithley 2400 at {resource}')
-                    return True, sm
+                    self.finding=False
+                    return True, self.sm, resource
 
             except Exception as e:
                 self.dialogue_queue.put(f'Failed to connect to {resource}: {e}')
+                self.finding=False
                 continue
 
         self.dialogue_queue.put("Keithley 2400 not found.")
         self.dialogue_queue.put("Check the Keithley is in RS232 mode, baud =9600, bits =8, parity= none, flow control= none, read termination= CR")
         self.dialogue_queue.put("and or try switch on and off and replug the USB in.")
-        return False, None
-                
+        self.finding=False
+        return False, None, None
+        
+    def set_timeout(self, ms: int):
+        """Adjust the VISA timeout (in milliseconds) on the current device."""
+        # assume you stored the adapter or the sm object as self.sm
+        self.sm.adapter.timeout = ms
+        # if needed:
+        # self.sm.adapter.session.timeout = ms        
             
 if __name__=='__main__':   
     

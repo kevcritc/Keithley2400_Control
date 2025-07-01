@@ -19,6 +19,7 @@ secrets.json
 config_local.py
 *.sqlite3
 *.log
+*.txt
 
 # Token files
 *.pem
