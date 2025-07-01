@@ -24,10 +24,13 @@ import os
 import warnings
 import json
 import re
+from wakepy import keep
+
 
 
 class IVsweep():
     def collect_data(self):
+        self.sourcemeter.set_timeout(30000)
         self.dialogue_queue.put('Setting up measurement')
         self.running = True
         self.sweep = True
@@ -77,48 +80,49 @@ class IVsweep():
         self.running=False
 
     def run_volts(self):
-        self.dialogue_queue.put('Measuring')
-
-        currents = np.zeros_like(self.voltages)
-        currentsstd = np.zeros_like(self.voltages)
-        i = 0
-
-        while i < len(self.voltages) and self.running:
-            self.sourcemeter.source_voltage = self.voltages[i]
-            time.sleep(0.1)
-            
-            currents_only=self.sourcemeter.current
-            currents[i] = np.mean(currents_only)
-            currentsstd[i] = np.std(currents_only)
-            self.data_queue.put([self.voltages[:i], currents[:i], currentsstd[:i]])  
-            i += 1
-
-        self.dialogue_queue.put('Saving data')
-        self.sourcemeter.shutdown()
-        raw_name = self.vsweep_sample.get()
-        safe_name = self.sanitize_filename(raw_name)
-        name = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S.csv")
-        full_filename = os.path.join(self.save_path, safe_name + '_' + name)
-
-        data = pd.DataFrame({
-            'Voltage (V)': self.voltages,
-            'Current (A)': currents,
-            'Current std (A)': currentsstd
-        })
-        
+        with keep.running():
+            self.dialogue_queue.put('Measuring')
     
-        df=pd.DataFrame(data)
-        df.to_csv(full_filename)
-        # Define the JSON settings filename
-        settings_filename = full_filename.replace(".csv", "_settings.json")
+            currents = np.zeros_like(self.voltages)
+            currentsstd = np.zeros_like(self.voltages)
+            i = 0
+    
+            while i < len(self.voltages) and self.running:
+                self.sourcemeter.source_voltage = self.voltages[i]
+                time.sleep(0.1)
+                
+                currents_only=self.sourcemeter.current
+                currents[i] = np.mean(currents_only)
+                currentsstd[i] = np.std(currents_only)
+                self.data_queue.put([self.voltages[:i], currents[:i], currentsstd[:i]])  
+                i += 1
+    
+            self.dialogue_queue.put('Saving data')
+            self.sourcemeter.shutdown()
+            raw_name = self.vsweep_sample.get()
+            safe_name = self.sanitize_filename(raw_name)
+            name = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S.csv")
+            full_filename = os.path.join(self.save_path, safe_name + '_' + name)
+    
+            data = pd.DataFrame({
+                'Voltage (V)': self.voltages,
+                'Current (A)': currents,
+                'Current std (A)': currentsstd
+            })
+            
         
-        # Save current settings using your existing method
-        with open(settings_filename, 'w') as f:
-            json.dump(self.get_settings_dict(), f, indent=4)
-
-
-        self.dialogue_queue.put(f'Data saved to {full_filename}')
-        self.dialogue_queue.put(f"Settings saved to {settings_filename}")
+            df=pd.DataFrame(data)
+            df.to_csv(full_filename)
+            # Define the JSON settings filename
+            settings_filename = full_filename.replace(".csv", "_settings.json")
+            
+            # Save current settings using your existing method
+            with open(settings_filename, 'w') as f:
+                json.dump(self.get_settings_dict(), f, indent=4)
+    
+    
+            self.dialogue_queue.put(f'Data saved to {full_filename}')
+            self.dialogue_queue.put(f"Settings saved to {settings_filename}")
 
 
         
@@ -127,114 +131,115 @@ class IVsweep4probe():
     # Connect and configure the instrument might need to edit
     # Either uses loop values or V1 to V2  method.
     def collect_data1(self, queue):
-        try:
-            self.dialogue_queue.put('Setting up measurement')
-            self.running=True
-            self.sweep=True
-            self.queue=queue
-            self.data_points = int(self.step_box.get())
-            self.averages = int(self.ave_box.get())
-            self.max_volt = float(self.vlimit_box.get())
-            if abs(self.max_volt)>199:
-                self.max_volt=199
-            self.dialogue_queue.put(f'Max voltage allowed is {self.max_volt}')
-            self.startI=float(self.start_box.get())
-            self.endI=float(self.end_box.get())
-            self.prename=self.sample_box.get()
-            self.val=self.CheckVar1.get()
-            if self.startI>self.endI:
-                self.startI, self.endI=self.endI, self.startI
-            self.sourcemeter.reset()
-            self.sourcemeter.use_front_terminals()
-            if self.four_wire_var.get() == 1:
-                self.sourcemeter.adapter.write("SYST:RSEN ON")
-                self.dialogue_queue.put("4-wire sensing enabled.")
-            else:
-                self.sourcemeter.adapter.write("SYST:RSEN OFF")
-                self.dialogue_queue.put("4-wire sensing disabled.")
-            time.sleep(0.1)
-            self.sourcemeter.apply_current()
-            self.sourcemeter.compliance_voltage=self.max_volt
-            # --- Voltage ---
-            selected_v_range = self.voltage_range_var.get()
-            if selected_v_range == "auto":
-                self.sourcemeter.measure_voltage(auto_range=True)
-            else:
-                self.sourcemeter.measure_voltage(voltage=float(selected_v_range), auto_range=False)
-    
-            time.sleep(0.1) # wait here to give the instrument time to react
-            self.sourcemeter.config_buffer(self.averages)
-            self.sourcemeter.enable_source()
-            time.sleep(0.1)
-            self.dialogue_queue.put('Sourcemeter is ready')
-            if self.val==1:
-                startnode=float(self.startnode.get())
-                highnode=float(self.highnode.get())
-                lownode=float(self.lownode.get())
-                step_val=float(self.stepsize.get())
-                amp1=np.arange(startnode,highnode,step_val)
-                amp2=np.arange(highnode,lownode,-1*step_val)
-                amp3=np.arange(lownode,startnode+step_val,step_val)
-                numberofloops=int(self.loopno.get())
-                self.amps=np.concatenate((amp1, amp2, amp3))
-                ampscopy=self.amps.copy()
-                for n in range(numberofloops-1):      
-                    self.amps=np.concatenate((self.amps,ampscopy))
-            else:
-            # Allocate arrays to store the measurement results
-                self.amps = np.linspace(self.startI, self.endI, num=int(self.data_points))
-            self.run_amps()
-            self.set_controls_state(NORMAL)
-        except Exception as e:
-            self.dialogue_queue.put(f"Error during measurement: {e}")
-        finally:
-            self.set_controls_state(NORMAL)
-            self.running = False
+        with keep.running():
+            try:
+                self.dialogue_queue.put('Setting up measurement')
+                self.running=True
+                self.sweep=True
+                self.queue=queue
+                self.data_points = int(self.step_box.get())
+                self.averages = int(self.ave_box.get())
+                self.max_volt = float(self.vlimit_box.get())
+                if abs(self.max_volt)>199:
+                    self.max_volt=199
+                self.dialogue_queue.put(f'Max voltage allowed is {self.max_volt}')
+                self.startI=float(self.start_box.get())
+                self.endI=float(self.end_box.get())
+                self.prename=self.sample_box.get()
+                self.val=self.CheckVar1.get()
+                if self.startI>self.endI:
+                    self.startI, self.endI=self.endI, self.startI
+                self.sourcemeter.reset()
+                self.sourcemeter.use_front_terminals()
+                if self.four_wire_var.get() == 1:
+                    self.sourcemeter.adapter.write("SYST:RSEN ON")
+                    self.dialogue_queue.put("4-wire sensing enabled.")
+                else:
+                    self.sourcemeter.adapter.write("SYST:RSEN OFF")
+                    self.dialogue_queue.put("4-wire sensing disabled.")
+                time.sleep(0.1)
+                self.sourcemeter.apply_current()
+                self.sourcemeter.compliance_voltage=self.max_volt
+                # --- Voltage ---
+                selected_v_range = self.voltage_range_var.get()
+                if selected_v_range == "auto":
+                    self.sourcemeter.measure_voltage(auto_range=True)
+                else:
+                    self.sourcemeter.measure_voltage(voltage=float(selected_v_range), auto_range=False)
+        
+                time.sleep(0.1) # wait here to give the instrument time to react
+                self.sourcemeter.config_buffer(self.averages)
+                self.sourcemeter.enable_source()
+                time.sleep(0.1)
+                self.dialogue_queue.put('Sourcemeter is ready')
+                if self.val==1:
+                    startnode=float(self.startnode.get())
+                    highnode=float(self.highnode.get())
+                    lownode=float(self.lownode.get())
+                    step_val=float(self.stepsize.get())
+                    amp1=np.arange(startnode,highnode,step_val)
+                    amp2=np.arange(highnode,lownode,-1*step_val)
+                    amp3=np.arange(lownode,startnode+step_val,step_val)
+                    numberofloops=int(self.loopno.get())
+                    self.amps=np.concatenate((amp1, amp2, amp3))
+                    ampscopy=self.amps.copy()
+                    for n in range(numberofloops-1):      
+                        self.amps=np.concatenate((self.amps,ampscopy))
+                else:
+                # Allocate arrays to store the measurement results
+                    self.amps = np.linspace(self.startI, self.endI, num=int(self.data_points))
+                self.run_amps()
+                self.set_controls_state(NORMAL)
+            except Exception as e:
+                self.dialogue_queue.put(f"Error during measurement: {e}")
+            finally:
+                self.set_controls_state(NORMAL)
+                self.running = False
         
     def run_amps(self):
+        with keep.running():
+            volts = np.zeros_like(self.amps)
+            voltsstd = np.zeros_like(self.amps)
+            i=0
+            self.dialogue_queue.put('Running measurement')
+            # Loop through each voltage point, measure and record the voltage
+            while i<len(self.amps) and self.sweep and self.running:
+                self.sourcemeter.source_current=self.amps[i]
+                time.sleep(0.1)
+                voltsarray=np.array(self.sourcemeter.voltage)
+                # Record the average and standard deviation
+                volts[i] = np.mean(voltsarray)
+                voltsstd[i] =np.std(voltsarray)
+                self.data_queue.put([self.amps[:i], volts[:i], voltsstd[:i]])   
+                i+=1
+            self.sourcemeter.shutdown()   
+            self.dialogue_queue.put('Stopping measurement')
+            # Save the data columns in a CSV file
+            data = pd.DataFrame({
+                
+                'Current (A)': self.amps,
+                'Voltage mean (V)': volts,
+                'Voltage std (A)':voltsstd,
+                
+            })
+            # create a file name usine time date save it to the py code path.
+            name = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S.csv")
+            raw_name = self.sample_box.get()
+            save_path = self.save_dir.get()
+            safe_name = self.sanitize_filename(raw_name)
+            full_filename = os.path.join(save_path, safe_name + '_' + name)
         
-        volts = np.zeros_like(self.amps)
-        voltsstd = np.zeros_like(self.amps)
-        i=0
-        self.dialogue_queue.put('Running measurement')
-        # Loop through each voltage point, measure and record the voltage
-        while i<len(self.amps) and self.sweep and self.running:
-            self.sourcemeter.source_current=self.amps[i]
-            time.sleep(0.1)
-            voltsarray=np.array(self.sourcemeter.voltage)
-            # Record the average and standard deviation
-            volts[i] = np.mean(voltsarray)
-            voltsstd[i] =np.std(voltsarray)
-            self.data_queue.put([self.amps[:i], volts[:i], voltsstd[:i]])   
-            i+=1
-        self.sourcemeter.shutdown()   
-        self.dialogue_queue.put('Stopping measurement')
-        # Save the data columns in a CSV file
-        data = pd.DataFrame({
+            df=pd.DataFrame(data)
+            df.to_csv(full_filename)
+            self.dialogue_queue.put(f'Data saved to{full_filename}')
+            # Define the JSON settings filename
+            settings_filename = full_filename.replace(".csv", "_settings.json")
             
-            'Current (A)': self.amps,
-            'Voltage mean (V)': volts,
-            'Voltage std (A)':voltsstd,
-            
-        })
-        # create a file name usine time date save it to the py code path.
-        name = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S.csv")
-        raw_name = self.sample_box.get()
-        save_path = self.save_dir.get()
-        safe_name = self.sanitize_filename(raw_name)
-        full_filename = os.path.join(save_path, safe_name + '_' + name)
-    
-        df=pd.DataFrame(data)
-        df.to_csv(full_filename)
-        self.dialogue_queue.put(f'Data saved to{full_filename}')
-        # Define the JSON settings filename
-        settings_filename = full_filename.replace(".csv", "_settings.json")
-        
-        # Save current settings using your existing method
-        with open(settings_filename, 'w') as f:
-            json.dump(self.get_settings_dict(), f, indent=4)
-        self.dialogue_queue.put(f'Settings saved to{settings_filename}')
-        self.running=False
+            # Save current settings using your existing method
+            with open(settings_filename, 'w') as f:
+                json.dump(self.get_settings_dict(), f, indent=4)
+            self.dialogue_queue.put(f'Settings saved to{settings_filename}')
+            self.running=False
         
         
 
@@ -307,6 +312,7 @@ class Set_voltage:
 
 # Class for logging current for a voltage manually and steping.        
 class Log_current:
+    
     # 1) Clear any existing handlers so basicConfig will take effect
     root = logging.getLogger()
     for h in list(root.handlers):
@@ -387,46 +393,46 @@ class Log_current:
             inter_mod=0.0
             self.dialogue_queue.put('The sampling takes about 0.7s - it is possible to reduce but will require some changes')
             
-        
-        while self.running:
-            try:
-                # Drain the instrument’s buffer
-                current_samples = np.array(self.sourcemeter.current)
-                self.currentlog.append(np.mean(current_samples))
-            except visa.VisaIOError as e:
-                # catch the exact timeout code
-                if e.error_code == visa.constants.VI_ERROR_TMO:
-                    self.dialogue_queue.put("Timeout -> likely woke from sleep")
-                    self._reconnect()
-                    last_read = time.time()
-                    continue
-                else:
-                    self.dialogue_queue.put(f"VISA error: {e}")
-                    break
-            
-            try:
-                self.currentlogstd.append(np.std(current_samples) / np.sqrt(len(current_samples)))
-            except:
-                self.currentlogstd.append(0)
-            if self.sourcemeter.is_buffer_full():
-                self.sourcemeter.reset_buffer()
-                self.dialogue_queue.put('Resetting buffer')
-                self.logger.debug('Resetting buffer')
-            errors=self.sourcemeter.check_errors()  
-            if len(errors)>0:
+        with keep.running():
+            while self.running:
+                try:
+                    # Drain the instrument’s buffer
+                    current_samples = np.array(self.sourcemeter.current)
+                    self.currentlog.append(np.mean(current_samples))
+                except visa.VisaIOError as e:
+                    # catch the exact timeout code
+                    if e.error_code == visa.constants.VI_ERROR_TMO:
+                        self.dialogue_queue.put("Timeout -> likely woke from sleep")
+                        self._reconnect()
+                        last_read = time.time()
+                        continue
+                    else:
+                        self.dialogue_queue.put(f"VISA error: {e}")
+                        break
                 
-                self.logger.debug(f'Errors {errors}')
-            current_time = time.time()
-            last_read = current_time
-            self.timelog.append(current_time-start_time)
-            time.sleep(inter_mod)
-            if current_time-start_time>self.maxtime:
-                self.stop_voltage()
-            data=[self.timelog,self.currentlog,self.currentlogstd]
-            self.time_data_queue.put(data)
-        self.dialogue_queue.put('Stopped')
-        self.set_controls_state(NORMAL)
-        self.save_data()
+                try:
+                    self.currentlogstd.append(np.std(current_samples) / np.sqrt(len(current_samples)))
+                except:
+                    self.currentlogstd.append(0)
+                if self.sourcemeter.is_buffer_full():
+                    self.sourcemeter.reset_buffer()
+                    self.dialogue_queue.put('Resetting buffer')
+                    self.logger.debug('Resetting buffer')
+                errors=self.sourcemeter.check_errors()  
+                if len(errors)>0:
+                    
+                    self.logger.debug(f'Errors {errors}')
+                current_time = time.time()
+                last_read = current_time
+                self.timelog.append(current_time-start_time)
+                time.sleep(inter_mod)
+                if current_time-start_time>self.maxtime:
+                    self.stop_voltage()
+                data=[self.timelog,self.currentlog,self.currentlogstd]
+                self.time_data_queue.put(data)
+            self.dialogue_queue.put('Stopped')
+            self.set_controls_state(NORMAL)
+            self.save_data()
     def _reconnect(self):
         """Close and reopen the VISA session & re-apply all settings."""
         self.dialogue_queue.put("Reconnecting after sleep…")
@@ -1041,7 +1047,7 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
         
         if self.connection==None:
             self.connectbutton.config(state=DISABLED)
-            self.connection=ConnectKeithley(self.dialogue_queue,probe_timeout=1000)
+            self.connection=ConnectKeithley(self.dialogue_queue,probe_timeout=5000)
             self.query, self.sourcemeter, self.resource=self.connection.find()
             if self.query:
                 self.dialogue_queue.put("Keithley connection successful.")
@@ -1058,9 +1064,10 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
                 self.stop_button.config(state=DISABLED)
                 self.vsweep_stop.config(state=DISABLED)
                 self.timelogstop_button.config(state=DISABLED)
+                self.connection=None
             self.connectbutton.config(state=NORMAL)
-            if self.connection != None:
-                self.connection.set_timeout(50000)
+        
+            
     def disconnect(self):
         if self.sourcemeter:
             try:
@@ -1112,6 +1119,8 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
             
             
     def log_time_thread(self):
+        
+       
         if not self.running:
             self.running=True
             self.t3=Thread(target=self.log_I, args=(self.time_data_queue,self.resource),daemon=True)
@@ -1121,15 +1130,17 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
             self.create_a_time_plot()
    
     def threading1(self):
+        
         t1=Thread(target=self.apply, daemon=True)
         t1.start()
     def threading2(self):
+        
         self.running=True
         self.t2=Thread(target=self.collect_data1, args=(self.data_queue,),daemon=True)
         self.t2.start()
         self.set_controls_state(DISABLED)
         self.create_a_plot('current')
-        
+    
     def create_a_time_plot(self):
         """Collect data from the sourcemeter and plot against time."""
     
@@ -1228,7 +1239,7 @@ class App(IVsweep, IVsweep4probe,Set_voltage, Log_current):
 
 class ConnectKeithley:
     
-    def __init__(self, dialogue_queue,probe_timeout=1000):
+    def __init__(self, dialogue_queue,probe_timeout=5000):
         self.rm = visa.ResourceManager()
         self.dialogue_queue = dialogue_queue
         self.probe_timeout = probe_timeout
